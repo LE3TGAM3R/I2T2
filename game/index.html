@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ZERO HOUR — FPS</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#000;overflow:hidden;font-family:'Courier New',monospace;user-select:none;}
+#c{display:block;position:fixed;top:0;left:0;width:100vw;height:100vh;}
+
+/* ── HUD ── */
+#hud{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10;}
+#hud.hidden{display:none;}
+
+/* Crosshair */
+#xhair{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:22px;height:22px;}
+#xhair::before,#xhair::after{content:'';position:absolute;background:rgba(255,255,255,.85);}
+#xhair::before{width:2px;height:18px;top:2px;left:10px;}
+#xhair::after{width:18px;height:2px;top:10px;left:2px;}
+#xhair.ads::before{height:10px;top:0;}
+#xhair.ads::after{width:10px;left:0;}
+#xhair.snipe{display:none;}
+
+/* Hit marker */
+#hm{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);opacity:0;transition:opacity .08s;pointer-events:none;}
+#hm.kill{filter:drop-shadow(0 0 4px #f00);}
+.hml{position:absolute;width:10px;height:2px;background:#fff;border-radius:1px;}
+.hml.a{top:4px;left:0;transform:rotate(-45deg);}
+.hml.b{top:4px;left:10px;transform:rotate(45deg);}
+.hml.c{top:14px;left:0;transform:rotate(45deg);}
+.hml.d{top:14px;left:10px;transform:rotate(-45deg);}
+
+/* Bottom-left stats */
+#stats{position:absolute;bottom:24px;left:24px;}
+.srow{display:flex;align-items:center;margin-bottom:8px;}
+.sicon{font-size:18px;width:28px;text-align:center;}
+.sicon.h{color:#f44;}
+.sicon.a{color:#48f;}
+.sicon.s{color:#fa0;font-size:14px;}
+.bar{background:rgba(0,0,0,.65);border:1px solid rgba(255,255,255,.15);border-radius:2px;overflow:hidden;}
+#hpbar{width:200px;height:16px;}
+#hpfill{height:100%;background:linear-gradient(90deg,#900,#f44);transition:width .2s;border-radius:2px;}
+#hpnum{color:#fff;font-size:13px;font-weight:bold;margin-left:8px;min-width:36px;}
+#arbar{width:140px;height:10px;}
+#arfill{height:100%;background:linear-gradient(90deg,#048,#48f);transition:width .2s;border-radius:2px;}
+#arnum{color:#8af;font-size:11px;margin-left:6px;min-width:24px;}
+#stbar{width:120px;height:5px;margin-top:2px;}
+#stfill{height:100%;background:#fa0;transition:width .12s;border-radius:2px;}
+
+/* Bottom-right ammo */
+#ammo{position:absolute;bottom:24px;right:24px;text-align:right;}
+#wname{color:#fc0;font-size:12px;text-transform:uppercase;letter-spacing:3px;margin-bottom:4px;}
+#amcur{color:#fff;font-size:42px;font-weight:bold;line-height:1;}
+#amres{color:#777;font-size:18px;}
+#reload{color:#fa0;font-size:14px;text-transform:uppercase;letter-spacing:3px;display:none;animation:blk .5s infinite;}
+@keyframes blk{0%,100%{opacity:1}50%{opacity:.2}}
+#wslots{position:absolute;bottom:100px;right:24px;text-align:right;display:flex;flex-direction:column;gap:3px;}
+.ws{color:#555;font-size:11px;padding:2px 6px;letter-spacing:1px;}
+.ws.cur{color:#fc0;border-left:2px solid #fc0;padding-left:4px;}
+
+/* Top-left info */
+#info{position:absolute;top:20px;left:20px;}
+#lvltxt{color:#fc0;font-size:12px;text-transform:uppercase;letter-spacing:3px;}
+#wavtxt{color:#fff;font-size:22px;font-weight:bold;margin:2px 0;}
+#ktxt{color:#f64;font-size:12px;}
+#scrtxt{color:#aaa;font-size:11px;}
+
+/* Top-right minimap */
+#mm{position:absolute;top:20px;right:20px;width:160px;height:160px;background:rgba(0,0,0,.7);border:1px solid rgba(255,255,255,.12);border-radius:3px;}
+#perklist{position:absolute;top:190px;right:20px;display:flex;flex-direction:column;gap:4px;}
+.pi{background:rgba(0,0,0,.7);border:1px solid #fc0;color:#fc0;font-size:10px;padding:3px 8px;letter-spacing:1px;text-transform:uppercase;border-radius:2px;}
+
+/* Damage vignette */
+#dmgvfx{position:fixed;inset:0;pointer-events:none;box-shadow:inset 0 0 120px rgba(255,0,0,.7);opacity:0;transition:opacity .08s;}
+#dmgvfx.on{opacity:1;}
+
+/* Low health pulse */
+#lowhp{position:fixed;inset:0;pointer-events:none;box-shadow:inset 0 0 200px rgba(180,0,0,.5);opacity:0;animation:pulse 1.2s infinite;}
+#lowhp.on{opacity:1;}
+@keyframes pulse{0%,100%{opacity:.3}50%{opacity:.8}}
+
+/* Scope */
+#scope{position:fixed;inset:0;pointer-events:none;display:none;}
+#scope.on{display:block;}
+#schole{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:400px;height:400px;border-radius:50%;border:3px solid #111;box-shadow:0 0 0 2000px rgba(0,0,0,.96);}
+#scch{position:absolute;top:50%;left:0;width:100%;height:1px;background:rgba(255,255,255,.6);}
+#sccv{position:absolute;top:0;left:50%;width:1px;height:100%;background:rgba(255,255,255,.6);}
+.sctick{position:absolute;background:rgba(255,255,255,.4);}
+
+/* Wave announce */
+#ann{position:fixed;top:28%;left:0;right:0;text-align:center;pointer-events:none;opacity:0;transition:opacity .4s;text-transform:uppercase;letter-spacing:8px;color:#fc0;font-size:32px;font-weight:900;text-shadow:0 0 24px rgba(255,200,0,.8);}
+#ann.on{opacity:1;}
+#subann{position:fixed;top:36%;left:0;right:0;text-align:center;pointer-events:none;opacity:0;transition:opacity .4s;text-transform:uppercase;letter-spacing:4px;color:#fff;font-size:16px;}
+#subann.on{opacity:1;}
+
+/* Kill feed */
+#kf{position:absolute;top:20px;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;gap:4px;align-items:center;}
+.kfi{background:rgba(0,0,0,.65);color:#fff;font-size:11px;padding:3px 12px;border-radius:2px;letter-spacing:1px;animation:kfa 3.2s forwards;}
+@keyframes kfa{0%{opacity:0;transform:translateY(-6px)}8%{opacity:1;transform:translateY(0)}75%{opacity:1}100%{opacity:0}}
+.kfi.h{color:#ff8;}
+.kfi.e{color:#f88;}
+
+/* Explosion flash */
+#flash{position:fixed;inset:0;background:#fa5;pointer-events:none;opacity:0;transition:opacity .06s;}
+#flash.on{opacity:.35;}
+
+/* ── SCREENS ── */
+.scr{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:200;}
+.scr.hidden{display:none;}
+
+/* Main menu */
+#menu{background:radial-gradient(ellipse at 50% 40%,#0e0a1a,#000);}
+.gtitle{font-size:80px;font-weight:900;color:#fff;text-transform:uppercase;letter-spacing:16px;text-shadow:0 0 60px rgba(255,100,0,.9),0 0 120px rgba(255,50,0,.4);line-height:1;}
+.gsub{color:#f60;font-size:16px;letter-spacing:10px;text-transform:uppercase;margin:12px 0 56px;}
+.mbtn{background:transparent;border:2px solid #f60;color:#f60;font-family:'Courier New',monospace;font-size:16px;text-transform:uppercase;letter-spacing:5px;padding:14px 44px;margin:6px;cursor:pointer;min-width:260px;transition:all .18s;}
+.mbtn:hover{background:#f60;color:#000;box-shadow:0 0 24px rgba(255,100,0,.6);}
+.cinfo{position:absolute;bottom:28px;color:#333;font-size:11px;letter-spacing:2px;text-align:center;max-width:700px;}
+
+/* Perk screen */
+#perkscr{background:rgba(0,4,14,.97);}
+.ptitle{font-size:30px;color:#fc0;text-transform:uppercase;letter-spacing:8px;margin-bottom:6px;}
+.psub{color:#555;font-size:13px;margin-bottom:44px;letter-spacing:1px;}
+.pcs{display:flex;gap:20px;}
+.pc{background:rgba(255,255,255,.03);border:2px solid #222;padding:32px 24px;width:230px;cursor:pointer;transition:all .2s;text-align:center;border-radius:2px;}
+.pc:hover{border-color:#fc0;background:rgba(255,200,0,.06);transform:translateY(-6px);box-shadow:0 10px 40px rgba(255,200,0,.15);}
+.pcico{font-size:52px;display:block;margin-bottom:16px;filter:drop-shadow(0 0 8px currentColor);}
+.pcname{color:#fff;font-size:16px;text-transform:uppercase;letter-spacing:3px;margin-bottom:10px;font-weight:bold;}
+.pcdesc{color:#888;font-size:12px;line-height:1.6;}
+.pcstat{color:#fc0;font-size:24px;font-weight:bold;margin:12px 0 4px;}
+
+/* Game over */
+#goscreen{background:rgba(40,0,0,.97);}
+.gotitle{font-size:70px;font-weight:900;color:#f00;text-transform:uppercase;letter-spacing:10px;text-shadow:0 0 50px rgba(255,0,0,.8);margin-bottom:16px;}
+.gostats{color:#666;font-size:15px;margin-bottom:44px;text-align:center;line-height:2.2;}
+.gostats span{color:#ccc;}
+
+/* Win screen */
+#winscreen{background:rgba(0,18,6,.97);}
+.wintitle{font-size:54px;font-weight:900;color:#0f8;text-transform:uppercase;letter-spacing:8px;text-shadow:0 0 50px rgba(0,255,100,.6);margin-bottom:16px;}
+
+/* Pause screen */
+#pausescr{background:rgba(0,0,0,.85);backdrop-filter:blur(8px);}
+.ptxt{font-size:50px;color:#fff;text-transform:uppercase;letter-spacing:10px;margin-bottom:44px;}
+
+/* Loading */
+#loading{background:#000;}
+.ltxt{color:#f60;font-size:16px;letter-spacing:5px;animation:blk 1s infinite;}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<!-- HUD -->
+<div id="hud" class="hidden">
+  <div id="xhair"></div>
+  <div id="hm"><div class="hml a"></div><div class="hml b"></div><div class="hml c"></div><div class="hml d"></div></div>
+
+  <!-- top-left -->
+  <div id="info">
+    <div id="lvltxt">Level 1 — The Warehouse</div>
+    <div id="wavtxt">Wave 1 / 3</div>
+    <div id="ktxt">Kills: 0</div>
+    <div id="scrtxt">Score: 0</div>
+  </div>
+
+  <!-- top-right -->
+  <canvas id="mm" width="160" height="160"></canvas>
+  <div id="perklist"></div>
+
+  <!-- kill feed -->
+  <div id="kf"></div>
+
+  <!-- bottom-left -->
+  <div id="stats">
+    <div class="srow"><span class="sicon h">♥</span><div class="bar" id="hpbar"><div id="hpfill" style="width:100%"></div></div><span id="hpnum">100</span></div>
+    <div class="srow"><span class="sicon a">◆</span><div class="bar" id="arbar"><div id="arfill" style="width:0%"></div></div><span id="arnum">0</span></div>
+    <div class="srow"><span class="sicon s">▶</span><div class="bar" id="stbar"><div id="stfill" style="width:100%"></div></div></div>
+  </div>
+
+  <!-- bottom-right -->
+  <div id="ammo">
+    <div id="wname">Pistol</div>
+    <div><span id="amcur">12</span><span id="amres"> / 84</span></div>
+    <div id="reload">Reloading…</div>
+  </div>
+  <div id="wslots"></div>
+
+  <!-- fx overlays -->
+  <div id="dmgvfx"></div>
+  <div id="lowhp"></div>
+  <div id="flash"></div>
+
+  <!-- scope -->
+  <div id="scope"><div id="schole"><div id="scch"></div><div id="sccv"></div></div></div>
+
+  <!-- announcements -->
+  <div id="ann"></div>
+  <div id="subann"></div>
+</div>
+
+<!-- SCREENS -->
+<div id="menu" class="scr">
+  <div class="gtitle">ZERO HOUR</div>
+  <div class="gsub">No Mercy. No Retreat.</div>
+  <button class="mbtn" id="btnStart">▶ Start Game</button>
+  <button class="mbtn" id="btnControls">Controls</button>
+  <div class="cinfo">WASD Move · Mouse Look · LMB Fire · RMB ADS/Zoom · 1-5 Weapons · R Reload · Space Jump · Shift Sprint · C Crouch · ESC Pause · Scroll Switch Weapon</div>
+</div>
+
+<div id="perkscr" class="scr hidden">
+  <div class="ptitle">Choose Your Upgrade</div>
+  <div class="psub">Select one perk to enhance your combat capabilities</div>
+  <div class="pcs" id="perkCards"></div>
+</div>
+
+<div id="goscreen" class="scr hidden">
+  <div class="gotitle">YOU DIED</div>
+  <div class="gostats" id="goStats"></div>
+  <button class="mbtn" id="btnRetry">↺ Try Again</button>
+  <button class="mbtn" id="btnGoMenu">Main Menu</button>
+</div>
+
+<div id="winscreen" class="scr hidden">
+  <div class="wintitle">Mission Complete</div>
+  <div class="gostats" id="winStats"></div>
+  <button class="mbtn" id="btnPlayAgain">▶ Play Again</button>
+  <button class="mbtn" id="btnWinMenu">Main Menu</button>
+</div>
+
+<div id="pausescr" class="scr hidden">
+  <div class="ptxt">PAUSED</div>
+  <button class="mbtn" id="btnResume">▶ Resume</button>
+  <button class="mbtn" id="btnRestart">↺ Restart</button>
+  <button class="mbtn" id="btnPauseMenu">Main Menu</button>
+</div>
+
+<div id="loading" class="scr hidden">
+  <div class="ltxt">Loading…</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script src="js/game.js"></script>
+</body>
+</html>
