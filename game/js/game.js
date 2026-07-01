@@ -14,6 +14,190 @@ const MAXPITCH= Math.PI/2 - 0.06;
 const FSTEP   = 0.42;     // footstep interval (seconds)
 
 // ═══════════════════════════════════════════════════════════
+//  SETTINGS  (persisted in localStorage)
+// ═══════════════════════════════════════════════════════════
+class Settings {
+  constructor() {
+    this._d = { sensitivity:1.0, volume:0.45, quality:'auto' };
+    try { Object.assign(this._d, JSON.parse(localStorage.getItem('zh_s')||'{}')); } catch(e) {}
+  }
+  get(k) { return this._d[k]; }
+  set(k,v) { this._d[k]=v; try { localStorage.setItem('zh_s', JSON.stringify(this._d)); } catch(e) {} }
+
+  detectQuality() {
+    if (this._d.quality !== 'auto') return this._d.quality;
+    const mobile   = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
+    const mem      = navigator.deviceMemory || 4;
+    const cores    = navigator.hardwareConcurrency || 4;
+    if (mobile || mem <= 2 || cores <= 2) return 'low';
+    if (mem <= 4 || cores <= 4) return 'medium';
+    return 'high';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  TOUCH INPUT
+// ═══════════════════════════════════════════════════════════
+class TouchInput {
+  constructor() {
+    this.active = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+    this.joy    = { tid:-1, sx:0, sy:0, x:0, y:0, R:55 };
+    this.look   = { tid:-1, lx:0, ly:0 };
+    this._mdx=0; this._mdy=0;
+    this._fire=false; this._fireJust=false;
+    this._ads=false;
+    this._keys = {};
+    this._wdir = 0;
+    if (this.active) this._bind();
+  }
+
+  _bind() {
+    if (typeof document === 'undefined') return;
+    document.body.classList.add('touch');
+
+    const jzone = document.getElementById('jzone');
+    const knob  = document.getElementById('jknob');
+
+    // Joystick zone
+    jzone.addEventListener('touchstart', e => {
+      e.preventDefault();
+      const t = e.changedTouches[0];
+      if (this.joy.tid !== -1) return;
+      this.joy.tid = t.identifier;
+      this.joy.sx  = t.clientX;
+      this.joy.sy  = t.clientY;
+      this.joy.x   = 0; this.joy.y = 0;
+      const base = document.getElementById('jbase');
+      base.style.left = (t.clientX - 55)+'px';
+      base.style.bottom = (window.innerHeight - t.clientY - 55)+'px';
+    }, {passive:false});
+
+    // Look zone — drag to look, tap = fire
+    const lzone = document.getElementById('lzone');
+    lzone.addEventListener('touchstart', e => {
+      e.preventDefault();
+      for (const t of e.changedTouches) {
+        if (this.look.tid !== -1) continue;
+        this.look.tid = t.identifier;
+        this.look.lx  = t.clientX;
+        this.look.ly  = t.clientY;
+        this._fire = true;
+        this._fireJust = true;
+      }
+    }, {passive:false});
+
+    // Global move
+    document.addEventListener('touchmove', e => {
+      for (const t of e.changedTouches) {
+        if (t.identifier === this.joy.tid) {
+          const dx  = t.clientX - this.joy.sx;
+          const dy  = t.clientY - this.joy.sy;
+          const len = Math.sqrt(dx*dx+dy*dy);
+          const R   = this.joy.R;
+          const ang = Math.atan2(dy, dx);
+          const clamped = Math.min(len, R);
+          this.joy.x = Math.cos(ang)*clamped/R;
+          this.joy.y = Math.sin(ang)*clamped/R;
+          knob.style.left = (32 + Math.cos(ang)*clamped*0.72)+'px';
+          knob.style.top  = (32 + Math.sin(ang)*clamped*0.72)+'px';
+        }
+        if (t.identifier === this.look.tid) {
+          this._mdx += (t.clientX - this.look.lx) * 1.8;
+          this._mdy += (t.clientY - this.look.ly) * 1.8;
+          this.look.lx = t.clientX;
+          this.look.ly = t.clientY;
+        }
+      }
+    }, {passive:true});
+
+    const end = e => {
+      for (const t of e.changedTouches) {
+        if (t.identifier === this.joy.tid) {
+          this.joy.tid=-1; this.joy.x=0; this.joy.y=0;
+          knob.style.left='32px'; knob.style.top='32px';
+        }
+        if (t.identifier === this.look.tid) {
+          this.look.tid=-1; this._fire=false;
+        }
+      }
+    };
+    document.addEventListener('touchend', end);
+    document.addEventListener('touchcancel', end);
+
+    // Dedicated buttons
+    this._btn('t-fire',   v => { this._fire=v; if(v) this._fireJust=true; });
+    this._btn('t-jump',   v => this._keys.Space=v);
+    this._btn('t-crouch', v => this._keys.KeyC=v);
+    this._btn('t-ads',    v => { this._ads=v; document.getElementById('t-ads').classList.toggle('ads-active',v); });
+    this._btn('t-reload', v => { if(v){ this._keys.KeyR=true; setTimeout(()=>this._keys.KeyR=false,120); }});
+    this._btn('t-prev',   v => { if(v) this._wdir=-1; });
+    this._btn('t-next',   v => { if(v) this._wdir=1;  });
+    this._btn('t-pause',  v => { if(v) window._game?._pause(); });
+    document.getElementById('pausebtn')?.addEventListener('click', () => window._game?._pause());
+  }
+
+  _btn(id, fn) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('touchstart', e => { e.preventDefault(); fn(true); }, {passive:false});
+    el.addEventListener('touchend',   () => fn(false));
+    el.addEventListener('touchcancel',() => fn(false));
+  }
+
+  getMouse(sensMult=1) {
+    const dx = this._mdx * sensMult, dy = this._mdy * sensMult;
+    this._mdx=0; this._mdy=0;
+    const fj = this._fireJust; this._fireJust=false;
+    return { dx, dy, left:this._fire, leftJustPressed:fj, right:this._ads };
+  }
+
+  getKeys() {
+    const {x,y} = this.joy;
+    return { ...this._keys,
+      KeyW: y < -0.2, KeyS: y > 0.2, KeyA: x < -0.2, KeyD: x > 0.2,
+      ShiftLeft: Math.sqrt(x*x+y*y) > 0.85 };
+  }
+
+  consumeWdir() { const d=this._wdir; this._wdir=0; return d; }
+
+  show() { document.getElementById('tc')?.classList.remove('hidden'); }
+  hide() { document.getElementById('tc')?.classList.add('hidden'); }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  GAMEPAD INPUT
+// ═══════════════════════════════════════════════════════════
+class GamepadInput {
+  constructor() {
+    this._idx = -1;
+    this._prevFire = false;
+    window.addEventListener('gamepadconnected',    e => { this._idx = e.gamepad.index; });
+    window.addEventListener('gamepaddisconnected', e => { if(e.gamepad.index===this._idx) this._idx=-1; });
+  }
+
+  poll() {
+    if (this._idx === -1) return null;
+    const gp = navigator.getGamepads()[this._idx];
+    if (!gp) return null;
+    const ax = gp.axes, bt = gp.buttons;
+    const fire = !!(bt[7]?.pressed || bt[5]?.pressed);
+    const just = fire && !this._prevFire;
+    this._prevFire = fire;
+    return {
+      keys: {
+        KeyW: ax[1] < -.25, KeyS: ax[1] > .25, KeyA: ax[0] < -.25, KeyD: ax[0] > .25,
+        Space:     !!(bt[0]?.pressed),
+        KeyC:      !!(bt[1]?.pressed),
+        ShiftLeft: !!(bt[10]?.pressed) || Math.hypot(ax[0],ax[1]) > .85,
+        KeyR:      !!(bt[2]?.pressed),
+      },
+      mouse: { dx: ax[2]*9, dy: ax[3]*9, left:fire, leftJustPressed:just, right:!!(bt[6]?.pressed||bt[4]?.pressed) },
+      wdir: bt[4]?.pressed ? -1 : bt[5]?.pressed ? 1 : 0,
+    };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
 //  AUDIO ENGINE  (procedural Web Audio API)
 // ═══════════════════════════════════════════════════════════
 class AudioEngine {
@@ -1480,6 +1664,9 @@ class Game {
     this.level     = null;
     this.hud       = new HUD();
     this.perks     = new PerkSystem();
+    this.settings  = new Settings();
+    this.touch     = new TouchInput();
+    this.gamepad   = new GamepadInput();
 
     this.state     = 'MENU';
     this.levelIdx  = 0;
@@ -1489,21 +1676,29 @@ class Game {
     this.startTime = 0;
 
     this.keys  = {};
-    this.mouse = { dx:0, dy:0, left:false, right:false };
+    this.mouse = { dx:0, dy:0, left:false, right:false, leftJustPressed:false };
     this.raf   = null;
     this.prevT = 0;
+
+    this._enemiesExpected = 0;
+    this._enemiesSpawned  = 0;
 
     this._init();
   }
 
   _init() {
+    // WebGL check
+    const testCanvas = document.createElement('canvas');
+    if (!testCanvas.getContext('webgl') && !testCanvas.getContext('webgl2')) {
+      document.getElementById('nowgl').classList.add('show');
+      return;
+    }
+
     // Renderer
     const canvas = document.getElementById('c');
-    this.renderer = new THREE.WebGLRenderer({canvas, antialias:true});
+    this.renderer = new THREE.WebGLRenderer({canvas, antialias:true, powerPreference:'high-performance'});
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    this._applyQuality();
 
     // Scene + Camera
     this.scene  = new THREE.Scene();
@@ -1511,6 +1706,24 @@ class Game {
     this.camera.rotation.order = 'YXZ';
 
     this.particles = new ParticleSystem(this.scene);
+
+    // Orientation prompt (mobile portrait)
+    const orientWarn = document.getElementById('portrait-warn');
+    const checkOrient = () => {
+      if (!this.touch.active) return;
+      const portrait = window.innerHeight > window.innerWidth;
+      orientWarn.style.display = portrait ? 'flex' : 'none';
+    };
+    window.addEventListener('resize', checkOrient);
+    checkOrient();
+
+    // Pause when tab loses focus
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && this.state === 'PLAYING') this._pause();
+    });
+    window.addEventListener('blur', () => {
+      if (this.state === 'PLAYING') this._pause();
+    });
 
     // Events
     window.addEventListener('resize', () => {
@@ -1546,6 +1759,7 @@ class Game {
       this.keys[e.code] = true;
       if (this.state === 'PLAYING') {
         if (e.code==='Escape') this._pause();
+        if (e.code==='KeyF')   this._toggleFullscreen();
         if (e.code==='Digit1') this.player.switchWeapon(0);
         if (e.code==='Digit2') this.player.switchWeapon(1);
         if (e.code==='Digit3') this.player.switchWeapon(2);
@@ -1565,15 +1779,31 @@ class Game {
     });
 
     // UI buttons
-    document.getElementById('btnStart').onclick     = () => this._startGame();
-    document.getElementById('btnControls').onclick  = () => this._showControls();
-    document.getElementById('btnRetry').onclick     = () => this._startGame();
-    document.getElementById('btnGoMenu').onclick    = () => this._showMenu();
-    document.getElementById('btnPlayAgain').onclick = () => this._startGame();
-    document.getElementById('btnWinMenu').onclick   = () => this._showMenu();
-    document.getElementById('btnResume').onclick    = () => this._resume();
-    document.getElementById('btnRestart').onclick   = () => this._startGame();
-    document.getElementById('btnPauseMenu').onclick = () => this._showMenu();
+    document.getElementById('btnStart').onclick        = () => this._startGame();
+    document.getElementById('btnControls').onclick     = () => this._showControls();
+    document.getElementById('btnSettings').onclick     = () => this._showSettings('MENU');
+    document.getElementById('btnRetry').onclick        = () => this._startGame();
+    document.getElementById('btnGoMenu').onclick       = () => this._showMenu();
+    document.getElementById('btnPlayAgain').onclick    = () => this._startGame();
+    document.getElementById('btnWinMenu').onclick      = () => this._showMenu();
+    document.getElementById('btnResume').onclick       = () => this._resume();
+    document.getElementById('btnPauseSettings').onclick= () => this._showSettings('PAUSED');
+    document.getElementById('btnRestart').onclick      = () => this._startGame();
+    document.getElementById('btnPauseMenu').onclick    = () => this._showMenu();
+
+    // Settings screen controls
+    const ssens = document.getElementById('s-sens');
+    const svol  = document.getElementById('s-vol');
+    const squal = document.getElementById('s-qual');
+    ssens.value = this.settings.get('sensitivity');
+    svol.value  = this.settings.get('volume');
+    squal.value = this.settings.get('quality');
+    this._updateSettingsUI();
+    ssens.addEventListener('input', () => { this.settings.set('sensitivity', parseFloat(ssens.value)); this._updateSettingsUI(); });
+    svol.addEventListener('input',  () => { this.settings.set('volume', parseFloat(svol.value)); this.audio.master.gain.value = parseFloat(svol.value); this._updateSettingsUI(); });
+    squal.addEventListener('change',() => { this.settings.set('quality', squal.value); this._applyQuality(); });
+    document.getElementById('s-fs').addEventListener('click', () => this._toggleFullscreen());
+    document.getElementById('s-back').addEventListener('click', () => this._hideSettings());
 
     // Start render loop
     this.raf = requestAnimationFrame(t => this._loop(t));
@@ -1586,13 +1816,15 @@ class Game {
     this.score    = 0;
     this.startTime= performance.now();
 
-    this.perks    = new PerkSystem();
+    this.perks = new PerkSystem();
+    this._enemiesExpected = 0;
+    this._enemiesSpawned  = 0;
+    this._waveClearPending= false;
 
     document.querySelectorAll('.scr').forEach(s => s.classList.add('hidden'));
     this.hud.show();
     document.getElementById('perklist').innerHTML = '';
 
-    // Clean up
     if (this.player) {
       this.player.weapons.forEach(w => this.camera.remove(w.model));
     }
@@ -1602,12 +1834,21 @@ class Game {
     this.pickups = [];
     if (this.level) this.level.destroy();
 
-    // New player
     this.player = new Player(this.camera, this.scene, this.audio);
+    this.audio.master.gain.value = this.settings.get('volume');
 
     this._loadLevel(0);
     this.state = 'PLAYING';
-    document.getElementById('c').requestPointerLock();
+
+    if (!this.touch.active) {
+      document.getElementById('c').requestPointerLock();
+    } else {
+      this.touch.show();
+      try {
+        document.documentElement.requestFullscreen().catch(()=>{});
+        screen.orientation?.lock?.('landscape').catch(()=>{});
+      } catch(e) {}
+    }
   }
 
   _loadLevel(idx) {
@@ -1646,6 +1887,9 @@ class Game {
     const wave = data.waves[waveIdx];
     if (!wave) return;
 
+    this._enemiesExpected = wave.enemies.length;
+    this._enemiesSpawned  = 0;
+
     const spawns = this.level.getSpawnPoints();
     wave.enemies.forEach((type, i) => {
       setTimeout(() => {
@@ -1655,11 +1899,12 @@ class Game {
         const z  = sp.z + (Math.random()-.5)*5;
         const e  = new Enemy(type, new THREE.Vector3(x,0,z), this.scene, this.audio, this.particles);
         this.enemies.push(e);
+        this._enemiesSpawned++;
       }, i * 500);
     });
 
     setTimeout(() => {
-      this.hud.announce(`WAVE ${waveIdx+1}`, LEVELS[this.levelIdx].waves[waveIdx].enemies.length+' ENEMIES', 2);
+      this.hud.announce(`WAVE ${waveIdx+1}`, wave.enemies.length+' ENEMIES', 2);
     }, 200);
   }
 
@@ -1700,11 +1945,10 @@ class Game {
 
   _checkWave() {
     if (this._waveClearPending) return;
+    if (this._enemiesSpawned < this._enemiesExpected) return; // stagger still in progress
     const alive = this.enemies.filter(e => !e.isDead).length;
-    if (this.enemies.length === 0) return; // still spawning
     if (alive > 0) return;
     this._waveClearPending = true;
-    setTimeout(() => { this._waveClearPending = false; }, 4000);
 
     const data  = LEVELS[this.levelIdx];
     const nextW = this.waveIdx + 1;
@@ -1734,6 +1978,9 @@ class Game {
   _perkSelect() {
     this.state = 'PERK_SELECT';
     document.exitPointerLock();
+    if (this.touch.active) this.touch.hide();
+    this.hud.hide();
+
     const options = this.perks.getRandomOptions(3);
     const cont = document.getElementById('perkCards');
     cont.innerHTML = '';
@@ -1741,35 +1988,88 @@ class Game {
       const card = document.createElement('div');
       card.className = 'pc';
       card.innerHTML = `<span class="pcico">${pk.icon}</span><div class="pcname">${pk.name}</div><div class="pcstat">${pk.stat}</div><div class="pcdesc">${pk.desc}</div>`;
-      card.onclick = () => {
+      const choose = () => {
         this.perks.apply(pk.id, this.player);
         document.getElementById('perkscr').classList.add('hidden');
+        this.hud.show();
         this.state = 'PLAYING';
         this.levelIdx++;
         this._loadLevel(this.levelIdx);
-        document.getElementById('c').requestPointerLock();
+        if (!this.touch.active) {
+          document.getElementById('c').requestPointerLock();
+        } else {
+          this.touch.show();
+        }
       };
+      card.addEventListener('click', choose);
+      card.addEventListener('touchend', e => { e.preventDefault(); choose(); }, {passive:false});
       cont.appendChild(card);
     });
     document.getElementById('perkscr').classList.remove('hidden');
   }
 
+  _applyQuality() {
+    const q = this.settings.detectQuality();
+    const pr = q === 'low' ? 1 : q === 'medium' ? Math.min(devicePixelRatio,1.5) : Math.min(devicePixelRatio,2);
+    this.renderer.setPixelRatio(pr);
+    this.renderer.shadowMap.enabled = q !== 'low';
+    this.renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
+  }
+
+  _toggleFullscreen() {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(()=>{});
+    } else {
+      document.exitFullscreen().catch(()=>{});
+    }
+  }
+
+  _showSettings(returnState='MENU') {
+    this._settingsReturn = returnState;
+    document.querySelectorAll('.scr').forEach(s => s.classList.add('hidden'));
+    document.getElementById('settingsscr').classList.remove('hidden');
+    if (this.touch.active) this.touch.hide();
+  }
+
+  _hideSettings() {
+    document.getElementById('settingsscr').classList.add('hidden');
+    if (this._settingsReturn === 'PAUSED') {
+      document.getElementById('pausescr').classList.remove('hidden');
+      if (this.touch.active) this.touch.show();
+    } else {
+      document.getElementById('menu').classList.remove('hidden');
+    }
+  }
+
+  _updateSettingsUI() {
+    const s = this.settings;
+    document.getElementById('sv-sens').textContent = parseFloat(s.get('sensitivity')).toFixed(1)+'×';
+    document.getElementById('sv-vol').textContent  = Math.round(s.get('volume')*100)+'%';
+  }
+
   _pause() {
     if (this.state !== 'PLAYING') return;
     this.state = 'PAUSED';
+    document.exitPointerLock();
     document.getElementById('pausescr').classList.remove('hidden');
+    if (this.touch.active) this.touch.hide();
   }
 
   _resume() {
     this.state = 'PLAYING';
     document.getElementById('pausescr').classList.add('hidden');
-    document.getElementById('c').requestPointerLock();
+    if (!this.touch.active) {
+      document.getElementById('c').requestPointerLock();
+    } else {
+      this.touch.show();
+    }
   }
 
   _showMenu() {
     this.state = 'MENU';
     document.exitPointerLock();
     this.hud.hide();
+    if (this.touch.active) this.touch.hide();
     document.querySelectorAll('.scr').forEach(s => s.classList.add('hidden'));
     document.getElementById('menu').classList.remove('hidden');
   }
@@ -1794,6 +2094,8 @@ TIPS:
   _win() {
     this.state = 'WIN';
     document.exitPointerLock();
+    if (this.touch.active) this.touch.hide();
+    this.hud.hide();
     const elapsed = ((performance.now()-this.startTime)/60000).toFixed(1);
     document.getElementById('winStats').innerHTML =
       `Total Kills: <span>${this.kills}</span><br>
@@ -1806,6 +2108,8 @@ TIPS:
   _gameOver() {
     this.state = 'GAME_OVER';
     document.exitPointerLock();
+    if (this.touch.active) this.touch.hide();
+    this.hud.hide();
     document.getElementById('goStats').innerHTML =
       `Kills: <span>${this.kills}</span><br>
        Score: <span>${this.score}</span><br>
@@ -1826,11 +2130,45 @@ TIPS:
   }
 
   _update(dt) {
-    const walls   = this.level ? this.level.getWalls() : [];
-    const enemies = this.enemies;
+    const walls = this.level ? this.level.getWalls() : [];
 
-    // Player
-    this.player.update(dt, this.keys, this.mouse, walls, enemies, this.pickups, this.scene, this.particles, this);
+    // ── Merge all input sources ──
+    const sens  = this.settings.get('sensitivity');
+    const keys  = { ...this.keys };
+    const mouse = { ...this.mouse };
+
+    // Gamepad
+    const gp = this.gamepad.poll();
+    if (gp) {
+      Object.assign(keys, gp.keys);
+      mouse.dx += gp.mouse.dx;
+      mouse.dy += gp.mouse.dy;
+      if (gp.mouse.left)          mouse.left = true;
+      if (gp.mouse.leftJustPressed) mouse.leftJustPressed = true;
+      if (gp.mouse.right)         mouse.right = true;
+      if (gp.wdir && this.player) this.player.scrollWeapon(gp.wdir);
+    }
+
+    // Touch
+    if (this.touch.active) {
+      const tk = this.touch.getKeys();
+      const tm = this.touch.getMouse(sens);
+      Object.assign(keys, tk);
+      mouse.dx += tm.dx;
+      mouse.dy += tm.dy;
+      if (tm.left)             mouse.left = true;
+      if (tm.leftJustPressed)  mouse.leftJustPressed = true;
+      if (tm.right)            mouse.right = true;
+      const wd = this.touch.consumeWdir();
+      if (wd && this.player)   this.player.scrollWeapon(wd);
+    } else {
+      // Desktop: apply sensitivity to raw mouse
+      mouse.dx *= sens;
+      mouse.dy *= sens;
+    }
+
+    // Player update
+    this.player.update(dt, keys, mouse, walls, this.enemies, this.pickups, this.scene, this.particles, this);
     this.mouse.dx             = 0;
     this.mouse.dy             = 0;
     this.mouse.leftJustPressed = false;
