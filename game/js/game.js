@@ -944,9 +944,9 @@ class Player {
         }
       });
 
-      // World collision: floor, ceiling, walls
+      // World collision: floor, sky bound, walls (levels are open-air now)
       if (!exploded) {
-        if (r.pos.y < 0.05 || r.pos.y > 4.95) exploded = true;
+        if (r.pos.y < 0.05 || r.pos.y > 40) exploded = true;
         else for (const w of walls) {
           if (r.pos.x > w.min.x && r.pos.x < w.max.x &&
               r.pos.y > w.min.y && r.pos.y < w.max.y &&
@@ -1072,10 +1072,10 @@ class Player {
 //  ENEMY DATA
 // ═══════════════════════════════════════════════════════════
 const ENEMY_TYPES = {
-  grunt:  { name:'Grunt',    hp:100,  spd:3.2, dmg:12,  atkRange:20,  atkRate:1.5,  col:0xaa2222, acol:0xff4444, sz:1.0, h:1.8, score:100 },
-  heavy:  { name:'Heavy',    hp:420,  spd:1.7, dmg:28,  atkRange:18,  atkRate:2.4,  col:0x223388, acol:0x4466cc, sz:1.3, h:2.0, score:350 },
-  scout:  { name:'Scout',    hp:55,   spd:6.5, dmg:8,   atkRange:25,  atkRate:.75,  col:0x2a5c26, acol:0x44aa44, sz:0.8, h:1.6, score:175 },
-  boss:   { name:'COMMANDER',hp:2500, spd:2.8, dmg:45,  atkRange:35,  atkRate:.9,   col:0x880000, acol:0xff0000, sz:2.0, h:3.0, score:2000 },
+  grunt:  { name:'Grunt',    hp:100,  spd:3.2, dmg:12,  atkRange:20,  atkRate:1.5,  col:0xd4453a, acol:0xff6655, sz:1.0, h:1.8, score:100 },
+  heavy:  { name:'Heavy',    hp:420,  spd:1.7, dmg:28,  atkRange:18,  atkRate:2.4,  col:0x4a66d4, acol:0x77aaff, sz:1.3, h:2.0, score:350 },
+  scout:  { name:'Scout',    hp:55,   spd:6.5, dmg:8,   atkRange:25,  atkRate:.75,  col:0x4faa44, acol:0x77ff66, sz:0.8, h:1.6, score:175 },
+  boss:   { name:'COMMANDER',hp:2500, spd:2.8, dmg:45,  atkRange:35,  atkRate:.9,   col:0xc02020, acol:0xff2200, sz:2.0, h:3.0, score:2000 },
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -1122,33 +1122,38 @@ class Enemy {
 
   _buildMesh(d) {
     const g    = new THREE.Group();
-    const mat  = new THREE.MeshPhongMaterial({color:d.col});
-    const emat = new THREE.MeshPhongMaterial({color:d.acol, emissive:d.acol, emissiveIntensity:.3});
+    const mat  = new THREE.MeshPhongMaterial({color:d.col, shininess:26});
+    const dk   = new THREE.MeshPhongMaterial({color:shade(d.col,.55), shininess:10});
+    const emat = new THREE.MeshPhongMaterial({color:d.acol, emissive:d.acol, emissiveIntensity:.9});
+    emat.userData.baseE = d.acol;
     const s = d.sz;
 
-    // Torso
-    const torso = new THREE.Mesh(new THREE.BoxGeometry(.55*s,.65*s,.35*s), mat);
+    // Torso (tapered cylinder)
+    const torso = new THREE.Mesh(new THREE.CylinderGeometry(.3*s,.24*s,.68*s,10), mat);
     torso.position.y = .9*s + .325*s;
-    // Head
-    const head = new THREE.Mesh(new THREE.BoxGeometry(.38*s,.38*s,.38*s), mat);
+    // Head (sphere)
+    const head = new THREE.Mesh(new THREE.SphereGeometry(.21*s,12,10), mat);
     head.position.y = .9*s + .65*s + .19*s;
-    // Eyes
-    const eyeL = new THREE.Mesh(new THREE.BoxGeometry(.08*s,.08*s,.08*s), emat);
-    eyeL.position.set(-.1*s, .9*s+.65*s+.22*s, .2*s);
-    const eyeR = eyeL.clone(); eyeR.position.x = .1*s;
-    // Legs
-    const legL = new THREE.Mesh(new THREE.BoxGeometry(.22*s,.65*s,.22*s), mat);
-    legL.position.set(-.16*s, .325*s, 0);
-    const legR = legL.clone(); legR.position.x = .16*s;
-    // Arms
-    const armL = new THREE.Mesh(new THREE.BoxGeometry(.18*s,.55*s,.18*s), mat);
-    armL.position.set(-.39*s, .9*s+.15*s, 0);
-    const armR = armL.clone(); armR.position.x = .39*s;
+    // Eyes (glowing spheres)
+    const eyeL = new THREE.Mesh(new THREE.SphereGeometry(.05*s,8,6), emat);
+    eyeL.position.set(-.08*s, .9*s+.65*s+.22*s, .17*s);
+    const eyeR = eyeL.clone(); eyeR.position.x = .08*s;
+    // Legs (cylinders)
+    const legL = new THREE.Mesh(new THREE.CylinderGeometry(.09*s,.11*s,.65*s,8), dk);
+    legL.position.set(-.15*s, .325*s, 0);
+    const legR = legL.clone(); legR.position.x = .15*s;
+    // Arms (cylinders)
+    const armL = new THREE.Mesh(new THREE.CylinderGeometry(.07*s,.08*s,.55*s,8), dk);
+    armL.position.set(-.38*s, .9*s+.15*s, 0);
+    const armR = armL.clone(); armR.position.x = .38*s;
     // Gun
-    const gun = new THREE.Mesh(new THREE.BoxGeometry(.06*s,.06*s,.3*s), new THREE.MeshPhongMaterial({color:0x111111}));
-    gun.position.set(-.39*s, .9*s+.12*s, -.24*s);
+    const gun = new THREE.Mesh(new THREE.BoxGeometry(.06*s,.06*s,.3*s), new THREE.MeshPhongMaterial({color:0x151515}));
+    gun.position.set(-.38*s, .9*s+.12*s, -.24*s);
+    // Glowing chest core — pops against any backdrop, marks the enemy faction color
+    const core = new THREE.Mesh(new THREE.SphereGeometry(.08*s,8,6), emat);
+    core.position.set(0, .9*s+.4*s, .26*s);
 
-    g.add(torso,head,eyeL,eyeR,legL,legR,armL,armR,gun);
+    g.add(torso,head,eyeL,eyeR,legL,legR,armL,armR,gun,core);
 
     // HP bar (visible in world)
     const hpGeo = new THREE.PlaneGeometry(0.8*s, 0.08*s);
@@ -1237,12 +1242,15 @@ class Enemy {
       this.hpBar.lookAt(playerPos.x, this.hpBar.getWorldPosition(new THREE.Vector3()).y, playerPos.z);
     }
 
-    // Hit flash
+    // Hit flash (restore each material's own base emissive afterwards)
     if (this.hitFlash > 0) {
       this.hitFlash -= dt;
       this.mesh.traverse(m => { if (m.isMesh && m !== this.hpBar) m.material.emissive?.setHex(0xffffff); });
     } else {
-      this.mesh.traverse(m => { if (m.isMesh && m !== this.hpBar) m.material.emissive?.setHex(0x000000); });
+      this.mesh.traverse(m => {
+        if (m.isMesh && m !== this.hpBar)
+          m.material.emissive?.setHex(m.material.userData.baseE ?? 0x000000);
+      });
     }
   }
 
@@ -1318,18 +1326,100 @@ class Enemy {
 }
 
 // ═══════════════════════════════════════════════════════════
+//  PROCEDURAL TEXTURES  (canvas — no asset downloads)
+// ═══════════════════════════════════════════════════════════
+function hexStr(c) { return '#' + c.toString(16).padStart(6,'0'); }
+
+function shade(c, f) {
+  const r = Math.min(255, Math.round(((c>>16)&255)*f));
+  const g = Math.min(255, Math.round(((c>>8)&255)*f));
+  const b = Math.min(255, Math.round((c&255)*f));
+  return (r<<16)|(g<<8)|b;
+}
+
+function _noiseOn(ctx, size, dark, light) {
+  for (let i = 0; i < 700; i++) {
+    ctx.fillStyle = `rgba(0,0,0,${Math.random()*dark})`;
+    ctx.fillRect(Math.random()*size, Math.random()*size, 2, 2);
+  }
+  for (let i = 0; i < 350; i++) {
+    ctx.fillStyle = `rgba(255,255,255,${Math.random()*light})`;
+    ctx.fillRect(Math.random()*size, Math.random()*size, 2, 2);
+  }
+}
+
+function texFloor(base) {
+  const S = 256;
+  const cv = document.createElement('canvas'); cv.width = cv.height = S;
+  const x = cv.getContext('2d');
+  x.fillStyle = base; x.fillRect(0,0,S,S);
+  _noiseOn(x, S, .08, .05);
+  // tile seams
+  x.strokeStyle = 'rgba(0,0,0,.4)'; x.lineWidth = 3;
+  x.strokeRect(1,1,S-2,S-2);
+  x.lineWidth = 1.5;
+  x.beginPath(); x.moveTo(S/2,0); x.lineTo(S/2,S); x.moveTo(0,S/2); x.lineTo(S,S/2); x.stroke();
+  const t = new THREE.CanvasTexture(cv);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+function texWall(base, trim) {
+  const S = 256;
+  const cv = document.createElement('canvas'); cv.width = cv.height = S;
+  const x = cv.getContext('2d');
+  x.fillStyle = base; x.fillRect(0,0,S,S);
+  _noiseOn(x, S, .07, .04);
+  // panel lines
+  x.strokeStyle = 'rgba(0,0,0,.3)'; x.lineWidth = 2;
+  for (let i = 1; i < 4; i++) { x.beginPath(); x.moveTo(i*S/4,0); x.lineTo(i*S/4,S); x.stroke(); }
+  // darker footing band
+  x.fillStyle = 'rgba(0,0,0,.22)'; x.fillRect(0,S-38,S,38);
+  // accent trim line
+  x.fillStyle = trim; x.globalAlpha = .8;
+  x.fillRect(0,S-44,S,5);
+  x.globalAlpha = 1;
+  const t = new THREE.CanvasTexture(cv);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+function texCrate(base) {
+  const S = 128;
+  const cv = document.createElement('canvas'); cv.width = cv.height = S;
+  const x = cv.getContext('2d');
+  x.fillStyle = base; x.fillRect(0,0,S,S);
+  _noiseOn(x, S, .1, .06);
+  x.strokeStyle = 'rgba(0,0,0,.5)'; x.lineWidth = 6;
+  x.strokeRect(3,3,S-6,S-6);
+  x.lineWidth = 3;
+  x.beginPath(); x.moveTo(0,0); x.lineTo(S,S); x.moveTo(S,0); x.lineTo(0,S); x.stroke();
+  const t = new THREE.CanvasTexture(cv);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+// ═══════════════════════════════════════════════════════════
 //  LEVEL DATA
 // ═══════════════════════════════════════════════════════════
 const LEVELS = [
   {
     name:'The Warehouse',
-    fog:{ color:0x1a0a00, near:25, far:80 },
-    ambient:0x332211,
-    sky:0x080400,
-    floor:0x3a3028,
-    wall:0x4a3c2c,
-    accent:0xcc5500,
-    lightColor:0xff8833,
+    // Golden-hour sunset yard
+    fog:{ color:0xcf7f4e, near:45, far:150 },
+    ambient:0x6a5a70, ambientInt:1.0,
+    hemi:{ sky:0xffb27a, ground:0x54404a, int:0.85 },
+    skyTop:0x2b2a5e, skyBottom:0xff9a4d, stars:false,
+    floor:0x8d8378,
+    wall:0xa8926e,
+    accent:0xff8822,
+    lightColor:0xffd9a0, sunInt:1.5, sunPos:[35,18,25],
+    props:[
+      {x:-17,z:-17},{x:17,z:-22},{x:-22,z:8},{x:23,z:2},{x:-3,z:-12},{x:8,z:20},
+    ],
     walls:[
       // outer perimeter
       {x:0,  y:.5, z:-30, w:60,h:4,d:1},
@@ -1366,13 +1456,18 @@ const LEVELS = [
   },
   {
     name:'Military Base',
-    fog:{color:0x0a1400,near:30,far:90},
-    ambient:0x102010,
-    sky:0x050a02,
-    floor:0x2a3020,
-    wall:0x3c4830,
-    accent:0x44aa22,
-    lightColor:0x44cc44,
+    // Bright midday desert compound
+    fog:{ color:0xc4dcec, near:55, far:190 },
+    ambient:0x8fa3b8, ambientInt:1.05,
+    hemi:{ sky:0xcfe4ff, ground:0x8a8055, int:0.95 },
+    skyTop:0x3d87d6, skyBottom:0xd6ebf7, stars:false,
+    floor:0x9d926f,
+    wall:0x83875f,
+    accent:0x77dd44,
+    lightColor:0xfff3da, sunInt:1.7, sunPos:[20,40,15],
+    props:[
+      {x:-12,z:-25},{x:12,z:-25},{x:-30,z:10},{x:30,z:10},{x:-5,z:25},{x:5,z:25},{x:-18,z:-2},
+    ],
     walls:[
       {x:0,  y:.5, z:-40, w:80,h:5,d:1},
       {x:0,  y:.5, z:40,  w:80,h:5,d:1},
@@ -1406,13 +1501,18 @@ const LEVELS = [
   },
   {
     name:'Research Lab',
-    fog:{color:0x000814,near:20,far:70},
-    ambient:0x0a1028,
-    sky:0x020408,
-    floor:0x181c28,
-    wall:0x1c2034,
-    accent:0x0088ff,
-    lightColor:0x4488ff,
+    // Neon night — dark but vivid, tron-style glow
+    fog:{ color:0x1a2a52, near:42, far:160 },
+    ambient:0x5c6c96, ambientInt:1.35,
+    hemi:{ sky:0x7288bc, ground:0x2c3454, int:1.0 },
+    skyTop:0x060a1c, skyBottom:0x28418a, stars:true,
+    floor:0x525c80,
+    wall:0x474f78,
+    accent:0x44d4ff,
+    lightColor:0xaec4ff, sunInt:1.2, sunPos:[-25,30,-20],
+    props:[
+      {x:-14,z:-14},{x:14,z:-14},{x:-14,z:14},{x:14,z:14},{x:-27,z:-27},{x:27,z:27},
+    ],
     walls:[
       {x:0,  y:.5, z:-35, w:70,h:5,d:1},
       {x:0,  y:.5, z:35,  w:70,h:5,d:1},
@@ -1467,22 +1567,49 @@ class Level {
   build() {
     const d = this.data;
 
-    // Sky
-    this.scene.background = new THREE.Color(d.sky);
+    this.scene.background = new THREE.Color(d.skyBottom);
     this.scene.fog = new THREE.Fog(d.fog.color, d.fog.near, d.fog.far);
 
-    // Ambient
-    const amb = new THREE.AmbientLight(d.ambient, 1);
-    this.scene.add(amb);
-    this.lights.push(amb);
+    // ── Skydome: vertical gradient (+ stars at night)
+    // Canvas must be wide — it wraps the full 360° of the dome, and a
+    // narrow texture smears the stars into streaks.
+    const skyCv = document.createElement('canvas');
+    skyCv.width = 1024; skyCv.height = 256;
+    const sx = skyCv.getContext('2d');
+    const grad = sx.createLinearGradient(0, 0, 0, 256);
+    grad.addColorStop(0, hexStr(d.skyTop));
+    grad.addColorStop(1, hexStr(d.skyBottom));
+    sx.fillStyle = grad; sx.fillRect(0, 0, 1024, 256);
+    if (d.stars) {
+      sx.fillStyle = '#fff';
+      for (let i = 0; i < 320; i++) {
+        sx.globalAlpha = .25 + Math.random()*.75;
+        const r = Math.random() < .12 ? 1.6 : 1;
+        sx.fillRect(Math.random()*1024, Math.random()*150, r, r);
+      }
+      sx.globalAlpha = 1;
+    }
+    const skyTex = new THREE.CanvasTexture(skyCv);
+    skyTex.colorSpace = THREE.SRGBColorSpace;
+    const sky = new THREE.Mesh(
+      new THREE.SphereGeometry(230, 20, 14),
+      new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, fog: false })
+    );
+    this.scene.add(sky);
+    this.objects.push(sky);
 
-    // Sun / main light
-    const sun = new THREE.DirectionalLight(d.lightColor, 0.9);
-    sun.position.set(10, 20, 10);
+    // ── Lights: ambient + hemisphere (sky/ground bounce) + sun
+    const amb = new THREE.AmbientLight(d.ambient, d.ambientInt ?? 1);
+    const hemi = new THREE.HemisphereLight(d.hemi.sky, d.hemi.ground, d.hemi.int);
+    this.scene.add(amb, hemi);
+    this.lights.push(amb, hemi);
+
+    const sun = new THREE.DirectionalLight(d.lightColor, d.sunInt ?? 1.3);
+    sun.position.set(d.sunPos[0], d.sunPos[1], d.sunPos[2]);
     sun.castShadow = true;
     sun.shadow.mapSize.width  = 2048;
     sun.shadow.mapSize.height = 2048;
-    sun.shadow.camera.near = .5; sun.shadow.camera.far = 120;
+    sun.shadow.camera.near = .5; sun.shadow.camera.far = 160;
     sun.shadow.camera.left = -60; sun.shadow.camera.right = 60;
     sun.shadow.camera.top = 60; sun.shadow.camera.bottom = -60;
     this.scene.add(sun);
@@ -1490,48 +1617,87 @@ class Level {
 
     // Accent point lights
     for (let i = 0; i < 6; i++) {
-      const pl = new THREE.PointLight(d.accent, 1.5, 20);
-      pl.position.set(
-        (Math.random()-.5)*50,
-        3.5,
-        (Math.random()-.5)*50
-      );
+      const pl = new THREE.PointLight(d.accent, 2.2, 24);
+      pl.position.set((Math.random()-.5)*50, 4, (Math.random()-.5)*50);
       this.scene.add(pl);
       this.lights.push(pl);
     }
 
-    // Floor
-    const floorGeo = new THREE.PlaneGeometry(120, 120);
-    const floorMat = new THREE.MeshPhongMaterial({color: d.floor});
-    const floor = new THREE.Mesh(floorGeo, floorMat);
+    // ── Floor (tiled texture)
+    const ftex = texFloor(hexStr(d.floor));
+    ftex.repeat.set(28, 28);
+    const floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(120, 120),
+      new THREE.MeshPhongMaterial({ map: ftex })
+    );
     floor.rotation.x = -Math.PI/2;
     floor.receiveShadow = true;
     this.scene.add(floor);
     this.objects.push(floor);
 
-    // Ceiling
-    const ceil = floor.clone();
-    ceil.rotation.x = Math.PI/2;
-    ceil.position.y = 5;
-    ceil.receiveShadow = false;
-    this.scene.add(ceil);
-    this.objects.push(ceil);
+    // ── Walls + crates (textured, with glowing accent trim)
+    const wallTexBase  = texWall(hexStr(d.wall), hexStr(d.accent));
+    const crateTexBase = texCrate(hexStr(shade(d.wall, 1.15)));
+    const trimMat = new THREE.MeshBasicMaterial({ color: d.accent });
 
-    // Walls + crates
     for (const w of d.walls) {
-      const geo = new THREE.BoxGeometry(w.w, w.h, w.d);
-      const mat = new THREE.MeshPhongMaterial({color: d.wall});
-      const mesh = new THREE.Mesh(geo, mat);
+      const isCrate = w.w <= 4.5 && w.d <= 4.5 && w.h <= 2.5;
+      const tex = (isCrate ? crateTexBase : wallTexBase).clone();
+      tex.needsUpdate = true;
+      tex.repeat.set(
+        Math.max(1, Math.round(Math.max(w.w, w.d) / 3)),
+        Math.max(1, Math.round(w.h / 2.5))
+      );
+      const mesh = new THREE.Mesh(
+        new THREE.BoxGeometry(w.w, w.h, w.d),
+        new THREE.MeshPhongMaterial({ map: tex })
+      );
       mesh.position.set(w.x, w.y + w.h/2 - .5, w.z);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       this.scene.add(mesh);
       this.objects.push(mesh);
 
+      // Glowing trim along the top edge — breaks up the box silhouette
+      const trim = new THREE.Mesh(
+        new THREE.BoxGeometry(w.w + .06, .09, w.d + .06),
+        trimMat
+      );
+      trim.position.set(w.x, w.y + w.h - .5 + .045, w.z);
+      this.scene.add(trim);
+      this.objects.push(trim);
+
       // AABB
       this.walls.push({
         min: new THREE.Vector3(w.x - w.w/2, 0,          w.z - w.d/2),
         max: new THREE.Vector3(w.x + w.w/2, w.h + w.y,  w.z + w.d/2),
+      });
+    }
+
+    // ── Props: barrels (rounded shapes to offset the boxes)
+    for (const p of (d.props || [])) {
+      const body = new THREE.Mesh(
+        new THREE.CylinderGeometry(.48, .48, 1.15, 14),
+        new THREE.MeshPhongMaterial({ color: shade(d.wall, .8), shininess: 40 })
+      );
+      body.position.set(p.x, .575, p.z);
+      body.castShadow = true;
+      body.receiveShadow = true;
+      this.scene.add(body);
+      this.objects.push(body);
+
+      const band = new THREE.Mesh(
+        new THREE.CylinderGeometry(.49, .49, .14, 14),
+        new THREE.MeshBasicMaterial({ color: d.accent })
+      );
+      band.position.set(p.x, .68, p.z);
+      this.scene.add(band);
+      this.objects.push(band);
+
+      // Collider (full height so the player can't drop inside it)
+      this.walls.push({
+        min: new THREE.Vector3(p.x - .5, 0, p.z - .5),
+        max: new THREE.Vector3(p.x + .5, 3, p.z + .5),
       });
     }
   }
@@ -1544,18 +1710,31 @@ class Level {
     const pickups = [];
     for (const p of this.data.pickups) {
       const colors = {health:0xff2244,ammo:0xffcc00,armor:0x2266ff,weapon:0x44ff88};
-      const geo = new THREE.SphereGeometry(.28,8,8);
-      const mat = new THREE.MeshPhongMaterial({color:colors[p.type],emissive:colors[p.type],emissiveIntensity:.5,transparent:true,opacity:.9});
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.set(p.x, .6, p.z);
-      scene.add(mesh);
+      const c = colors[p.type];
+      const grp = new THREE.Group();
 
-      // Label
-      const pl = new THREE.PointLight(colors[p.type], 1.5, 3);
+      const orb = new THREE.Mesh(
+        new THREE.SphereGeometry(.28,10,8),
+        new THREE.MeshPhongMaterial({color:c,emissive:c,emissiveIntensity:.7,transparent:true,opacity:.92})
+      );
+      grp.add(orb);
+
+      // Halo ring that spins with the group
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(.46,.035,8,26),
+        new THREE.MeshBasicMaterial({color:c})
+      );
+      ring.rotation.x = Math.PI/2;
+      grp.add(ring);
+
+      grp.position.set(p.x, .6, p.z);
+      scene.add(grp);
+
+      const pl = new THREE.PointLight(c, 2, 4);
       pl.position.set(p.x, 1.2, p.z);
       scene.add(pl);
 
-      pickups.push({mesh, pos:new THREE.Vector3(p.x,.6,p.z), type:p.type, wid:p.wid, light:pl});
+      pickups.push({mesh:grp, pos:new THREE.Vector3(p.x,.6,p.z), type:p.type, wid:p.wid, light:pl});
     }
     return pickups;
   }
@@ -1564,7 +1743,10 @@ class Level {
     this.objects.forEach(o => {
       this.scene.remove(o);
       if (o.geometry) o.geometry.dispose();
-      if (o.material) o.material.dispose();
+      if (o.material) {
+        if (o.material.map) o.material.map.dispose();
+        o.material.dispose();
+      }
     });
     this.lights.forEach(l => this.scene.remove(l));
     this.objects = [];
@@ -1814,6 +1996,8 @@ class Game {
     const canvas = document.getElementById('c');
     this.renderer = new THREE.WebGLRenderer({canvas, antialias:true, powerPreference:'high-performance'});
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.25;
     this._applyQuality();
 
     // Scene + Camera

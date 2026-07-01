@@ -1,14 +1,14 @@
 'use strict';
 // ZERO HOUR service worker — cache-first app shell for offline play
-const CACHE = 'zh-v1';
+const CACHE = 'zh-v2';
 const ASSETS = [
   './',
   './index.html',
   './js/game.js',
+  './js/three.min.js',
   './manifest.json',
   './icon-192.png',
   './icon-512.png',
-  'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js',
 ];
 
 self.addEventListener('install', e => {
