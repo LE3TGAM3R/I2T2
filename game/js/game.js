@@ -13,6 +13,39 @@ const SENS    = 0.0022;   // mouse sensitivity
 const MAXPITCH= Math.PI/2 - 0.06;
 const FSTEP   = 0.42;     // footstep interval (seconds)
 
+// Segment-vs-AABB occlusion test (slab method).
+// from/to are world points; boxes have min/max Vector3s.
+function segmentBlocked(from, to, boxes) {
+  const dx = to.x-from.x, dy = to.y-from.y, dz = to.z-from.z;
+  for (const b of boxes) {
+    let tmin = 0, tmax = 1;
+    let ok = true;
+    const axes = [[dx, from.x, b.min.x, b.max.x],
+                  [dy, from.y, b.min.y, b.max.y],
+                  [dz, from.z, b.min.z, b.max.z]];
+    for (const [d, o, mn, mx] of axes) {
+      if (Math.abs(d) < 1e-9) {
+        if (o < mn || o > mx) { ok = false; break; }
+      } else {
+        let t1 = (mn - o) / d, t2 = (mx - o) / d;
+        if (t1 > t2) { const t = t1; t1 = t2; t2 = t; }
+        tmin = Math.max(tmin, t1);
+        tmax = Math.min(tmax, t2);
+        if (tmin > tmax) { ok = false; break; }
+      }
+    }
+    if (ok) return true;
+  }
+  return false;
+}
+
+// Difficulty presets (enemy hp / enemy damage / score multiplier)
+const DIFFICULTY = {
+  easy:   { label:'Easy',   hp:0.7, dmg:0.6, score:0.75 },
+  normal: { label:'Normal', hp:1.0, dmg:1.0, score:1.0  },
+  hard:   { label:'Hard',   hp:1.5, dmg:1.5, score:1.5  },
+};
+
 // ═══════════════════════════════════════════════════════════
 //  SETTINGS  (persisted in localStorage)
 // ═══════════════════════════════════════════════════════════
@@ -379,6 +412,47 @@ class ParticleSystem {
 }
 
 // ═══════════════════════════════════════════════════════════
+//  FLOATING DAMAGE NUMBERS  (DOM, projected from 3D)
+// ═══════════════════════════════════════════════════════════
+class DamageNumbers {
+  constructor(camera) {
+    this.camera = camera;
+    this.cont   = document.getElementById('dnums');
+    this.items  = [];
+    this._v     = new THREE.Vector3();
+  }
+
+  spawn(pos, val, headshot) {
+    if (this.items.length > 28) { this.items[0].el.remove(); this.items.shift(); }
+    const el = document.createElement('div');
+    el.className = 'dn' + (headshot ? ' hs' : '');
+    el.textContent = val;
+    this.cont.appendChild(el);
+    this.items.push({ el, pos: pos.clone(), life: 0.8 });
+  }
+
+  update(dt) {
+    for (let i = this.items.length-1; i >= 0; i--) {
+      const d = this.items[i];
+      d.life -= dt;
+      d.pos.y += 1.6 * dt;
+      if (d.life <= 0) { d.el.remove(); this.items.splice(i,1); continue; }
+      this._v.copy(d.pos).project(this.camera);
+      if (this._v.z > 1) { d.el.style.display = 'none'; continue; }
+      d.el.style.display = 'block';
+      d.el.style.left    = ((this._v.x*0.5+0.5) * innerWidth) + 'px';
+      d.el.style.top     = ((-this._v.y*0.5+0.5) * innerHeight) + 'px';
+      d.el.style.opacity = Math.min(1, d.life/0.3);
+    }
+  }
+
+  clear() {
+    this.items.forEach(d => d.el.remove());
+    this.items = [];
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
 //  WEAPON DATA
 // ═══════════════════════════════════════════════════════════
 const WEAPONS = {
@@ -571,6 +645,9 @@ class Player {
     this.shakeOff  = new THREE.Vector3();
 
     camera.rotation.order = 'YXZ';
+    camera.rotation.z = 0;   // clear death-cam roll from a previous run
+    camera.fov = 75;
+    camera.updateProjectionMatrix();
 
     // Rockets in flight
     this.rockets = [];
@@ -616,7 +693,13 @@ class Player {
   get currentWeapon() { return this.weapons[this.weaponIdx]; }
 
   update(dt, keys, mouse, walls, enemies, pickups, scene, particles, game) {
-    if (this.isDead) { this.deathTimer -= dt; return; }
+    if (this.isDead) {
+      this.deathTimer -= dt;
+      // Death camera: tilt and sink toward the ground
+      this.camera.rotation.z += (0.55 - this.camera.rotation.z) * Math.min(1, dt*3);
+      this.camera.position.y += ((this.pos.y + 0.4) - this.camera.position.y) * Math.min(1, dt*3);
+      return;
+    }
 
     this.damageCooldown -= dt;
 
@@ -727,7 +810,9 @@ class Player {
       }
     } else {
       if (w) w.ads = false;
-      this.camera.fov = 75;
+      // Slight FOV kick while sprinting for a sense of speed
+      const targetFov = (this.sprinting && moving) ? 82 : 75;
+      this.camera.fov += (targetFov - this.camera.fov) * Math.min(1, dt*10);
       this.camera.updateProjectionMatrix();
       document.getElementById('scope').classList.remove('on');
       document.getElementById('xhair').classList.remove('ads','snipe');
@@ -787,7 +872,12 @@ class Player {
     this.raycaster.set(this.camera.position, dir);
     this.raycaster.far = w.d.range;
 
-    // Enemies first
+    // Level geometry occlusion — bullets stop at the first wall
+    const occluders = game.level ? game.level.objects : [];
+    const wallHits  = this.raycaster.intersectObjects(occluders);
+    const wallDist  = wallHits.length ? wallHits[0].distance : Infinity;
+
+    // Enemies
     const meshes = [];
     const meshMap = new Map();
     enemies.forEach(e => {
@@ -797,7 +887,7 @@ class Player {
     });
 
     const hits = this.raycaster.intersectObjects(meshes);
-    if (hits.length > 0) {
+    if (hits.length > 0 && hits[0].distance < wallDist) {
       const h = hits[0];
       const enemy = meshMap.get(h.object);
       if (enemy) {
@@ -806,14 +896,14 @@ class Player {
         const dmg  = Math.round((hs ? w.d.dmg*2 : w.d.dmg) * this.dmgMult);
         const killed = enemy.takeDamage(dmg, h.point, particles);
         this.audio.hit(hs || killed);
-        game.onHit(enemy, killed, hs);
+        game.onHit(enemy, killed, hs, dmg, h.point);
         particles.blood(h.point, hs ? 28 : 14);
         return;
       }
     }
 
-    // Wall sparks
-    particles.spark(this.camera.position.clone().addScaledVector(dir, 10), 6);
+    // Bullet stopped by geometry — spark at the impact point
+    if (wallHits.length) particles.spark(wallHits[0].point, 6);
   }
 
   _fireRocket(dir, scene, particles, w) {
@@ -854,6 +944,16 @@ class Player {
         }
       });
 
+      // World collision: floor, ceiling, walls
+      if (!exploded) {
+        if (r.pos.y < 0.05 || r.pos.y > 4.95) exploded = true;
+        else for (const w of walls) {
+          if (r.pos.x > w.min.x && r.pos.x < w.max.x &&
+              r.pos.y > w.min.y && r.pos.y < w.max.y &&
+              r.pos.z > w.min.z && r.pos.z < w.max.z) { exploded = true; break; }
+        }
+      }
+
       // Splash damage
       if (exploded || r.life <= 0) {
         particles.explosion(r.pos);
@@ -867,7 +967,7 @@ class Player {
           if (dist < splashR) {
             const dmg = Math.round(this.weapons[this.weaponIdx].d.dmg * (1 - dist/splashR) * this.dmgMult * (this.expMult||1));
             const killed = e.takeDamage(dmg, e.pos.clone(), particles);
-            game.onHit(e, killed, false);
+            game.onHit(e, killed, false, dmg, new THREE.Vector3(e.pos.x, e.height*0.8, e.pos.z));
           }
         });
 
@@ -949,6 +1049,17 @@ class Player {
     const dmg = document.getElementById('dmgvfx');
     dmg.classList.add('on');
     setTimeout(() => dmg.classList.remove('on'), 120);
+
+    // Damage direction indicator (attacker bearing relative to view)
+    if (fromPos) {
+      const a   = Math.atan2(fromPos.x - this.pos.x, fromPos.z - this.pos.z);
+      const deg = -((a - this.yaw + Math.PI) * 180 / Math.PI);
+      const el  = document.getElementById('dmgdir');
+      el.style.transform = `rotate(${deg}deg)`;
+      el.style.opacity = '1';
+      clearTimeout(this._ddT);
+      this._ddT = setTimeout(() => { el.style.opacity = '0'; }, 500);
+    }
 
     if (this.hp <= 0) { this.hp = 0; this.isDead = true; this.deathTimer = 1.5; }
   }
@@ -1158,12 +1269,11 @@ class Enemy {
   }
 
   _checkLOS(playerPos, walls) {
-    const dir = new THREE.Vector3().subVectors(playerPos, this.pos);
-    const dist = dir.length();
-    dir.normalize();
-    const rc = new THREE.Raycaster(this.pos.clone().add(new THREE.Vector3(0,1,0)), dir, 0, dist);
-    // Simple distance check (skip wall raycasting for performance)
-    return dist < 45;
+    const dist = this.pos.distanceTo(playerPos);
+    if (dist >= 45) return false;
+    const from = this.pos.clone(); from.y = this.height * 0.85;   // enemy eye
+    const to   = playerPos.clone(); to.y = playerPos.y + 1.4;     // player chest/head
+    return !segmentBlocked(from, to, walls);
   }
 
   _attack(player, dist) {
@@ -1534,8 +1644,8 @@ class HUD {
     document.getElementById('reload').style.display = (w && w.reloading) ? 'block' : 'none';
 
     // Info
-    document.getElementById('lvltxt').textContent = `Level ${levelIdx+1} — ${LEVELS[levelIdx].name}`;
-    document.getElementById('wavtxt').textContent = `Wave ${waveIdx+1} / ${LEVELS[levelIdx].waves.length}`;
+    document.getElementById('lvltxt').textContent = this.lvlLabel || `Level ${levelIdx+1} — ${LEVELS[levelIdx].name}`;
+    document.getElementById('wavtxt').textContent = `Wave ${waveIdx+1} / ${this.totalWaves || LEVELS[levelIdx].waves.length}`;
     document.getElementById('ktxt').textContent   = `Kills: ${kills}`;
     document.getElementById('scrtxt').textContent = `Score: ${score}`;
 
@@ -1669,10 +1779,16 @@ class Game {
     this.gamepad   = new GamepadInput();
 
     this.state     = 'MENU';
+    this.mode      = 'campaign';   // 'campaign' | 'endless'
     this.levelIdx  = 0;
     this.waveIdx   = 0;
+    this.waves     = [];
+    this.endlessRound = 0;
     this.kills     = 0;
     this.score     = 0;
+    this.combo     = 0;
+    this.comboTimer= 0;
+    this.diff      = DIFFICULTY.normal;
     this.startTime = 0;
 
     this.keys  = {};
@@ -1706,6 +1822,7 @@ class Game {
     this.camera.rotation.order = 'YXZ';
 
     this.particles = new ParticleSystem(this.scene);
+    this.dnums     = new DamageNumbers(this.camera);
 
     // Orientation prompt (mobile portrait)
     const orientWarn = document.getElementById('portrait-warn');
@@ -1779,7 +1896,8 @@ class Game {
     });
 
     // UI buttons
-    document.getElementById('btnStart').onclick        = () => this._startGame();
+    document.getElementById('btnStart').onclick        = () => this._startGame('campaign');
+    document.getElementById('btnEndless').onclick      = () => this._startGame('endless');
     document.getElementById('btnControls').onclick     = () => this._showControls();
     document.getElementById('btnSettings').onclick     = () => this._showSettings('MENU');
     document.getElementById('btnRetry').onclick        = () => this._startGame();
@@ -1805,21 +1923,40 @@ class Game {
     document.getElementById('s-fs').addEventListener('click', () => this._toggleFullscreen());
     document.getElementById('s-back').addEventListener('click', () => this._hideSettings());
 
+    // Difficulty selector
+    const savedDiff = this.settings.get('difficulty') || 'normal';
+    document.querySelectorAll('.diffbtn').forEach(b => {
+      b.classList.toggle('sel', b.dataset.diff === savedDiff);
+      b.addEventListener('click', () => {
+        this.settings.set('difficulty', b.dataset.diff);
+        document.querySelectorAll('.diffbtn').forEach(x => x.classList.toggle('sel', x === b));
+      });
+    });
+
+    this._updateBestUI();
+
     // Start render loop
     this.raf = requestAnimationFrame(t => this._loop(t));
   }
 
-  _startGame() {
+  _startGame(mode) {
+    this.mode     = mode || this.mode || 'campaign';
+    this.diff     = DIFFICULTY[this.settings.get('difficulty')] || DIFFICULTY.normal;
     this.levelIdx = 0;
     this.waveIdx  = 0;
+    this.endlessRound = 0;
     this.kills    = 0;
     this.score    = 0;
+    this.combo    = 0;
+    this.comboTimer = 0;
     this.startTime= performance.now();
 
     this.perks = new PerkSystem();
     this._enemiesExpected = 0;
     this._enemiesSpawned  = 0;
     this._waveClearPending= false;
+    this.dnums.clear();
+    document.getElementById('combo').classList.remove('on');
 
     document.querySelectorAll('.scr').forEach(s => s.classList.add('hidden'));
     this.hud.show();
@@ -1864,6 +2001,15 @@ class Game {
     this.level = new Level(data, this.scene);
     this.level.build();
 
+    // Waves: campaign uses authored data, endless generates scaled waves
+    this.waves = this.mode === 'endless'
+      ? this._generateEndlessWaves(this.endlessRound)
+      : data.waves;
+    this.hud.totalWaves = this.waves.length;
+    this.hud.lvlLabel   = this.mode === 'endless'
+      ? `Round ${this.endlessRound+1} — ${data.name}`
+      : `Level ${idx+1} — ${data.name}`;
+
     // Reset player position
     this.player.pos.set(0, PH*.5, 8);
     this.player.vel.set(0,0,0);
@@ -1872,23 +2018,41 @@ class Game {
 
     // Place pickups
     this.pickups = this.level.createPickups(this.scene);
+    this.dnums.clear();
 
     // Announce level
-    this.hud.announce(data.name, `${data.waves.length} WAVES`, 3);
+    const annTitle = this.mode === 'endless' ? `ROUND ${this.endlessRound+1}` : data.name;
+    this.hud.announce(annTitle, `${this.waves.length} WAVES`, 3);
     setTimeout(() => {
       if (this.state === 'PLAYING') this._spawnWave(0);
     }, 3200);
   }
 
+  _generateEndlessWaves(round) {
+    const pool  = ['grunt','grunt','grunt','scout','heavy'];
+    const waves = [];
+    for (let w = 0; w < 3; w++) {
+      const n  = 6 + round*2 + w*2;
+      const es = [];
+      for (let i = 0; i < n; i++) es.push(pool[Math.floor(Math.random()*pool.length)]);
+      if (w === 2 && round >= 1) es.push('boss');
+      if (w === 2 && round >= 4) es.push('boss');
+      waves.push({ enemies: es });
+    }
+    return waves;
+  }
+
   _spawnWave(waveIdx) {
     this._waveClearPending = false;
     this.waveIdx = waveIdx;
-    const data = LEVELS[this.levelIdx];
-    const wave = data.waves[waveIdx];
+    const wave = this.waves[waveIdx];
     if (!wave) return;
 
     this._enemiesExpected = wave.enemies.length;
     this._enemiesSpawned  = 0;
+
+    // Endless mode ramps enemy strength each round on top of difficulty
+    const endlessScale = this.mode === 'endless' ? 1 + this.endlessRound * 0.12 : 1;
 
     const spawns = this.level.getSpawnPoints();
     wave.enemies.forEach((type, i) => {
@@ -1898,6 +2062,9 @@ class Game {
         const x  = sp.x + (Math.random()-.5)*5;
         const z  = sp.z + (Math.random()-.5)*5;
         const e  = new Enemy(type, new THREE.Vector3(x,0,z), this.scene, this.audio, this.particles);
+        e.hp    = Math.round(e.hp    * this.diff.hp  * endlessScale);
+        e.maxHp = e.hp;
+        e.dmg   = Math.round(e.dmg   * this.diff.dmg * endlessScale);
         this.enemies.push(e);
         this._enemiesSpawned++;
       }, i * 500);
@@ -1908,16 +2075,24 @@ class Game {
     }, 200);
   }
 
-  onHit(enemy, killed, headshot) {
+  onHit(enemy, killed, headshot, dmg, point) {
     this.hud.showHitMarker(killed || headshot);
+    if (dmg && point) this.dnums.spawn(point, dmg, headshot);
     if (killed) {
       this.kills++;
-      this.score += enemy.score;
+      this.combo++;
+      this.comboTimer = 3;
+      const mult = Math.min(1 + (this.combo-1)*0.25, 4);
+      this.score += Math.round(enemy.score * mult * this.diff.score);
+      if (this.combo >= 2) {
+        const c = document.getElementById('combo');
+        c.textContent = `×${mult.toFixed(2).replace(/\.?0+$/,'')} COMBO — ${this.combo} KILLS`;
+        c.classList.add('on');
+      }
       if (this.player.vampHeal) this.player.heal(this.player.vampHeal);
-      const isHead = headshot;
       this.hud.addKillFeed(
-        (isHead ? '🎯 HEADSHOT — ' : '⚔ ') + enemy.name + ' eliminated',
-        isHead ? 'h' : 'e'
+        (headshot ? '🎯 HEADSHOT — ' : '⚔ ') + enemy.name + ' eliminated',
+        headshot ? 'h' : 'e'
       );
     }
   }
@@ -1950,10 +2125,9 @@ class Game {
     if (alive > 0) return;
     this._waveClearPending = true;
 
-    const data  = LEVELS[this.levelIdx];
     const nextW = this.waveIdx + 1;
 
-    if (nextW < data.waves.length) {
+    if (nextW < this.waves.length) {
       // Next wave
       setTimeout(() => {
         if (this.state !== 'PLAYING') return;
@@ -1963,8 +2137,13 @@ class Game {
         this._spawnWave(nextW);
       }, 3000);
       this.hud.announce('WAVE CLEAR!', `Next wave in 3 seconds…`, 2.5);
+    } else if (this.mode === 'endless') {
+      // Endless: always perk up and keep going
+      this.hud.announce(`ROUND ${this.endlessRound+1} CLEAR!`, `Score: ${this.score}`, 3);
+      this.audio.levelDone();
+      setTimeout(() => this._perkSelect(), 3200);
     } else {
-      // Level complete
+      // Campaign level complete
       this.hud.announce('LEVEL COMPLETE!', `+${this.score} points`, 3);
       this.audio.levelDone();
       if (this.levelIdx + 1 >= LEVELS.length) {
@@ -1993,7 +2172,12 @@ class Game {
         document.getElementById('perkscr').classList.add('hidden');
         this.hud.show();
         this.state = 'PLAYING';
-        this.levelIdx++;
+        if (this.mode === 'endless') {
+          this.endlessRound++;
+          this.levelIdx = (this.levelIdx + 1) % LEVELS.length;
+        } else {
+          this.levelIdx++;
+        }
         this._loadLevel(this.levelIdx);
         if (!this.touch.active) {
           document.getElementById('c').requestPointerLock();
@@ -2070,6 +2254,9 @@ class Game {
     document.exitPointerLock();
     this.hud.hide();
     if (this.touch.active) this.touch.hide();
+    this.dnums.clear();
+    document.getElementById('combo').classList.remove('on');
+    this._updateBestUI();
     document.querySelectorAll('.scr').forEach(s => s.classList.add('hidden'));
     document.getElementById('menu').classList.remove('hidden');
   }
@@ -2091,15 +2278,43 @@ TIPS:
     );
   }
 
+  _recordBest() {
+    let best = {};
+    try { best = JSON.parse(localStorage.getItem('zh_best') || '{}'); } catch(e) {}
+    const cur = best[this.mode] || { score: 0 };
+    if (this.score > cur.score) {
+      best[this.mode] = {
+        score: this.score, kills: this.kills,
+        round: this.endlessRound + 1, level: this.levelIdx + 1,
+      };
+      try { localStorage.setItem('zh_best', JSON.stringify(best)); } catch(e) {}
+      this._updateBestUI();
+      return true;
+    }
+    return false;
+  }
+
+  _updateBestUI() {
+    let best = {};
+    try { best = JSON.parse(localStorage.getItem('zh_best') || '{}'); } catch(e) {}
+    const lines = [];
+    if (best.campaign) lines.push(`Best Campaign: <span>${best.campaign.score}</span> pts · ${best.campaign.kills} kills`);
+    if (best.endless)  lines.push(`Best Endless: <span>${best.endless.score}</span> pts · Round ${best.endless.round}`);
+    document.getElementById('beststats').innerHTML = lines.join('<br>');
+  }
+
   _win() {
     this.state = 'WIN';
     document.exitPointerLock();
     if (this.touch.active) this.touch.hide();
     this.hud.hide();
+    const isNewBest = this._recordBest();
     const elapsed = ((performance.now()-this.startTime)/60000).toFixed(1);
     document.getElementById('winStats').innerHTML =
+      (isNewBest ? `<span class="newbest">★ NEW BEST SCORE ★</span><br>` : '') +
       `Total Kills: <span>${this.kills}</span><br>
        Final Score: <span>${this.score}</span><br>
+       Difficulty: <span>${this.diff.label}</span><br>
        Time: <span>${elapsed} min</span><br>
        Perks: <span>${this.perks.active.map(p=>p.name).join(', ')||'None'}</span>`;
     document.getElementById('winscreen').classList.remove('hidden');
@@ -2110,10 +2325,16 @@ TIPS:
     document.exitPointerLock();
     if (this.touch.active) this.touch.hide();
     this.hud.hide();
+    const isNewBest = this._recordBest();
+    const progress = this.mode === 'endless'
+      ? `Round Reached: <span>${this.endlessRound+1}</span>`
+      : `Level Reached: <span>${this.levelIdx+1} — ${LEVELS[this.levelIdx].name}</span>`;
     document.getElementById('goStats').innerHTML =
+      (isNewBest ? `<span class="newbest">★ NEW BEST SCORE ★</span><br>` : '') +
       `Kills: <span>${this.kills}</span><br>
        Score: <span>${this.score}</span><br>
-       Level Reached: <span>${this.levelIdx+1} — ${LEVELS[this.levelIdx].name}</span>`;
+       Difficulty: <span>${this.diff.label}</span><br>
+       ${progress}`;
     document.getElementById('goscreen').classList.remove('hidden');
   }
 
@@ -2194,8 +2415,18 @@ TIPS:
     const now = performance.now();
     this.pickups.forEach(p => { p.mesh.rotation.y += dt*1.8; p.mesh.position.y = .6 + Math.sin(now*.003)*.08; });
 
-    // Particles
+    // Combo timer decay
+    if (this.comboTimer > 0) {
+      this.comboTimer -= dt;
+      if (this.comboTimer <= 0) {
+        this.combo = 0;
+        document.getElementById('combo').classList.remove('on');
+      }
+    }
+
+    // Particles + damage numbers
     this.particles.update(dt);
+    this.dnums.update(dt);
 
     // HUD
     this.hud.update(this.player, this.levelIdx, this.waveIdx, this.kills, this.score, this.enemies, dt);

@@ -119,6 +119,18 @@ body.touch #wslots{display:none;}
 #scch{position:absolute;top:50%;left:0;width:100%;height:1px;background:rgba(255,255,255,.6);}
 #sccv{position:absolute;top:0;left:50%;width:1px;height:100%;background:rgba(255,255,255,.6);}
 
+/* Combo counter */
+#combo{position:absolute;top:57%;left:50%;transform:translateX(-50%);color:#fc0;font-size:clamp(14px,2.5vw,20px);font-weight:bold;letter-spacing:3px;opacity:0;transition:opacity .15s;text-shadow:0 0 14px rgba(255,200,0,.9);pointer-events:none;}
+#combo.on{opacity:1;}
+
+/* Damage direction indicator */
+#dmgdir{position:absolute;top:50%;left:50%;width:130px;height:130px;margin:-65px 0 0 -65px;border-radius:50%;border:5px solid transparent;border-top-color:rgba(255,30,30,.9);opacity:0;transition:opacity .45s;pointer-events:none;}
+
+/* Floating damage numbers */
+#dnums{position:absolute;inset:0;overflow:hidden;pointer-events:none;}
+.dn{position:absolute;color:#ffd24a;font-size:15px;font-weight:bold;text-shadow:0 0 4px #000,0 1px 2px #000;transform:translate(-50%,-50%);pointer-events:none;white-space:nowrap;}
+.dn.hs{color:#ff4444;font-size:19px;}
+
 /* Announcements */
 #ann{position:fixed;top:28%;left:0;right:0;text-align:center;pointer-events:none;opacity:0;transition:opacity .4s;text-transform:uppercase;letter-spacing:6px;color:#fc0;font-size:28px;font-weight:900;text-shadow:0 0 24px rgba(255,200,0,.8);}
 #ann.on{opacity:1;}
@@ -158,6 +170,12 @@ body.touch #pausebtn{display:none;}
 .mbtn{background:transparent;border:2px solid #f60;color:#f60;font-family:'Courier New',monospace;font-size:clamp(13px,2vw,16px);text-transform:uppercase;letter-spacing:4px;padding:12px 36px;margin:5px;cursor:pointer;min-width:clamp(200px,40vw,260px);transition:all .18s;touch-action:manipulation;}
 .mbtn:hover,.mbtn:active{background:#f60;color:#000;box-shadow:0 0 24px rgba(255,100,0,.6);}
 .cinfo{position:absolute;bottom:max(env(safe-area-inset-bottom,0px),20px);color:#333;font-size:10px;letter-spacing:2px;text-align:center;max-width:640px;padding:0 20px;}
+#beststats{color:#776;font-size:11px;letter-spacing:2px;margin-bottom:16px;text-align:center;line-height:1.9;min-height:1em;}
+#beststats span{color:#fc0;}
+.diffrow{display:flex;gap:8px;margin-bottom:14px;}
+.diffbtn{background:transparent;border:1px solid #444;color:#666;font-family:'Courier New',monospace;font-size:12px;letter-spacing:2px;padding:8px 20px;cursor:pointer;text-transform:uppercase;transition:all .15s;touch-action:manipulation;}
+.diffbtn.sel{border-color:#f60;color:#f60;box-shadow:0 0 10px rgba(255,100,0,.3);}
+.newbest{color:#0f8 !important;font-weight:bold;animation:blk 1s infinite;}
 
 /* Perk screen */
 #perkscr{background:rgba(0,4,14,.97);}
@@ -253,6 +271,10 @@ body.touch #pausebtn{display:none;}
   <div id="lowhp"></div>
   <div id="flash"></div>
 
+  <div id="dnums"></div>
+  <div id="combo"></div>
+  <div id="dmgdir"></div>
+
   <div id="scope"><div id="schole"><div id="scch"></div><div id="sccv"></div></div></div>
 
   <div id="ann"></div>
@@ -277,7 +299,14 @@ body.touch #pausebtn{display:none;}
 <div id="menu" class="scr">
   <div class="gtitle">ZERO HOUR</div>
   <div class="gsub">No Mercy. No Retreat.</div>
-  <button class="mbtn" id="btnStart">▶ Start Game</button>
+  <div id="beststats"></div>
+  <div class="diffrow">
+    <button class="diffbtn" data-diff="easy">Easy</button>
+    <button class="diffbtn sel" data-diff="normal">Normal</button>
+    <button class="diffbtn" data-diff="hard">Hard</button>
+  </div>
+  <button class="mbtn" id="btnStart">▶ Campaign</button>
+  <button class="mbtn" id="btnEndless">∞ Endless Mode</button>
   <button class="mbtn" id="btnSettings">⚙ Settings</button>
   <button class="mbtn" id="btnControls">Controls</button>
   <div class="cinfo">WASD Move · Mouse Look · LMB Fire · RMB ADS · 1-5 Weapons · R Reload · Space Jump · Shift Sprint · C Crouch · ESC Pause · F Fullscreen</div>
@@ -349,5 +378,10 @@ body.touch #pausebtn{display:none;}
 <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"
   onerror="document.getElementById('nowgl').classList.add('show');document.getElementById('nowgl').querySelector('div:last-child').textContent='Failed to load Three.js. Check your internet connection.'"></script>
 <script src="js/game.js"></script>
+<script>
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  navigator.serviceWorker.register('sw.js').catch(()=>{});
+}
+</script>
 </body>
 </html>
